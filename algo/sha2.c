@@ -522,6 +522,60 @@ static inline int scanhash_sha256d_4way(int thr_id, struct work *work,
 	return 0;
 }
 
+static inline int scanhash_sha256d_4way_le(int thr_id, struct work *work,
+	uint32_t max_nonce, uint64_t *hashes_done)
+{
+	uint32_t _ALIGN(128) data[4 * 64];
+	uint32_t _ALIGN(32) hash[4 * 8];
+	uint32_t _ALIGN(32) midstate[4 * 8];
+	uint32_t _ALIGN(32) prehash[4 * 8];
+	uint32_t *pdata = work->data;
+	uint32_t *ptarget = work->target;
+	uint32_t n = pdata[27] - 1;
+	const uint32_t first_nonce = pdata[27];
+	const uint32_t Htarg = ptarget[7];
+	int i, j;
+	memcpy(data, pdata + 16, 64);
+	sha256d_preextend(data);
+	for (i = 31; i >= 0; i--)
+		for (j = 0; j < 4; j++)
+			data[i * 4 + j] = data[i];
+	
+	sha256_init(midstate);
+	sha256_transform(midstate, pdata, 0);
+	memcpy(prehash, midstate, 32);
+	sha256d_prehash(prehash, pdata + 16);
+	for (i = 7; i >= 0; i--) {
+		for (j = 0; j < 4; j++) {
+			midstate[i * 4 + j] = midstate[i];
+			prehash[i * 4 + j] = prehash[i];
+		}
+	}
+	
+	do {
+		for (i = 0; i < 4; i++)
+			data[4 * 11 + i] = ++n;
+		
+		sha256d_ms_4way(hash, data, midstate, prehash);
+		
+		for (i = 0; i < 4; i++) {
+			if (swab32(hash[4 * 7 + i]) <= Htarg) {
+				pdata[27] = data[4 * 11 + i];
+				sha256d_80_swap(hash, pdata);
+				if (fulltest(hash, ptarget)) {
+					work_set_target_ratio(work, hash);
+					*hashes_done = n - first_nonce + 1;
+					return 1;
+				}
+			}
+		}
+	} while (n < max_nonce && !work_restart[thr_id].restart);
+	
+	*hashes_done = n - first_nonce + 1;
+	pdata[27] = n;
+	return 0;
+}
+
 #endif /* HAVE_SHA256_4WAY */
 
 #ifdef HAVE_SHA256_8WAY
@@ -571,6 +625,27 @@ static inline int scanhash_sha256d_8way(int thr_id, struct work *work,
 				pdata[19] = data[8 * 3 + i];
 				sha256d_80_swap(hash, pdata);
 				if (fulltest(hash, ptarget)) {
+					/*/debug
+					uint32_t hash_be[8], target_be[8], data_be[256];
+					char hash_str[65], target_str[65], data_str[256];
+					
+					for (char ii = 0; ii < 8; ii++) {
+						be32enc(hash_be + ii, hash[7 - ii]);
+						be32enc(target_be + ii, ptarget[7 - ii]);
+					}
+					for (char ii = 0; ii < 120; ii++) {
+						be32enc(data_be + ii, pdata[ii]);
+					}
+
+					bin2hex(hash_str, (unsigned char *)hash_be, 32);
+					bin2hex(target_str, (unsigned char *)target_be, 32);
+					bin2hex(data_str, (unsigned char *)data_be, 112);
+
+					applog(LOG_DEBUG, "DEBUG:  8way  \nHash:   %s\nTarget: %s\n Header %s\n",
+						hash_str,
+						target_str,
+						data_str);
+				// end debug					*/
 					work_set_target_ratio(work, hash);
 					*hashes_done = n - first_nonce + 1;
 					return 1;
@@ -584,10 +659,96 @@ static inline int scanhash_sha256d_8way(int thr_id, struct work *work,
 	return 0;
 }
 
+static inline int scanhash_sha256d_8way_le(int thr_id, struct work *work,
+	uint32_t max_nonce, uint64_t *hashes_done)
+{
+	
+	uint32_t _ALIGN(128) data[8 * 64];
+	uint32_t _ALIGN(32)  hash[8 * 8];
+	uint32_t _ALIGN(32)  midstate[8 * 8];
+	uint32_t _ALIGN(32)  prehash[8 * 8];
+	uint32_t *pdata = work->data;
+	uint32_t *ptarget = work->target;
+	uint32_t n = pdata[27] - 1;
+
+	const uint32_t first_nonce = pdata[27];
+	const uint32_t Htarg = ptarget[7];
+	int i, j;
+	
+	memcpy(data, pdata + 16, 64);
+	sha256d_preextend(data);
+	for (i = 31; i >= 0; i--)
+		for (j = 0; j < 8; j++)
+			data[i * 8 + j] = data[i];
+	
+	sha256_init(midstate);
+	sha256_transform(midstate, pdata, 0);
+	memcpy(prehash, midstate, 32);
+	sha256d_prehash(prehash, pdata + 16);
+	for (i = 7; i >= 0; i--) {
+		for (j = 0; j < 8; j++) {
+			midstate[i * 8 + j] = midstate[i];
+			prehash[i * 8 + j] = prehash[i];
+		}
+	}
+	
+	do {
+		for (i = 0; i < 8; i++)
+			data[8 * 11 + i] = ++n;
+
+		sha256d_ms_8way(hash, data, midstate, prehash);
+		for (i = 0; i < 8; i++) {
+			if (swab32(hash[8 * 7 + i]) <= Htarg) {
+				pdata[27] = data[8 * 11 + i];
+				sha256d_80_swap(hash, pdata);
+				if (fulltest(hash, ptarget)) {
+					/*/debug
+					uint32_t hash_be[8], target_be[8], data_be[256];
+					char hash_str[65], target_str[65], data_str[256];
+					
+					for (char ii = 0; ii < 8; ii++) {
+						be32enc(hash_be + ii, hash[7 - ii]);
+						be32enc(target_be + ii, ptarget[7 - ii]);
+					}
+					for (char ii = 0; ii < 120; ii++) {
+						be32enc(data_be + ii, pdata[ii]);
+					}
+
+					bin2hex(hash_str, (unsigned char *)hash_be, 32);
+					bin2hex(target_str, (unsigned char *)target_be, 32);
+					bin2hex(data_str, (unsigned char *)data_be, 112);
+
+					applog(LOG_DEBUG, "DEBUG:  8way  \nHash:   %s\nTarget: %s\n Header %s\n",
+						hash_str,
+						target_str,
+						data_str);
+				// end debug */
+					work_set_target_ratio(work, hash);
+					*hashes_done = n - first_nonce + 1;
+					return 1;
+				}
+			}
+		}
+	} while (n < max_nonce && !work_restart[thr_id].restart);
+	
+	*hashes_done = n - first_nonce + 1;
+	pdata[27] = n;
+	return 0;
+}
+
 #endif /* HAVE_SHA256_8WAY */
 
 int scanhash_sha256d(int thr_id, struct work *work, uint32_t max_nonce, uint64_t *hashes_done)
 {
+#ifdef HAVE_SHA256_8WAY
+	if (sha256_use_8way())
+		return scanhash_sha256d_8way(thr_id, work, max_nonce, hashes_done);
+#endif
+#ifdef HAVE_SHA256_4WAY
+	if (sha256_use_4way())
+		return scanhash_sha256d_4way(thr_id, work, max_nonce, hashes_done);
+#endif
+
 	uint32_t _ALIGN(128) data[64];
 	uint32_t _ALIGN(32) hash[8];
 	uint32_t _ALIGN(32) midstate[8];
@@ -597,19 +758,9 @@ int scanhash_sha256d(int thr_id, struct work *work, uint32_t max_nonce, uint64_t
 	const uint32_t first_nonce = pdata[19];
 	const uint32_t Htarg = ptarget[7];
 	uint32_t n = pdata[19] - 1;
-
-#ifdef HAVE_SHA256_8WAY
-	if (sha256_use_8way())
-		return scanhash_sha256d_8way(thr_id, work, max_nonce, hashes_done);
-#endif
-#ifdef HAVE_SHA256_4WAY
-	if (sha256_use_4way())
-		return scanhash_sha256d_4way(thr_id, work, max_nonce, hashes_done);
-#endif
-	
 	memcpy(data, pdata + 16, 64);
 	sha256d_preextend(data);
-	
+
 	sha256_init(midstate);
 	sha256_transform(midstate, pdata, 0);
 	memcpy(prehash, midstate, 32);
@@ -631,5 +782,76 @@ int scanhash_sha256d(int thr_id, struct work *work, uint32_t max_nonce, uint64_t
 	
 	*hashes_done = n - first_nonce + 1;
 	pdata[19] = n;
+	return 0;
+}
+
+
+int scanhash_sha256d_le(int thr_id, struct work *work, uint32_t max_nonce, uint64_t *hashes_done)
+{
+//created to speed up processing slightly.. les branching once set
+
+#ifdef HAVE_SHA256_8WAY
+	if (sha256_use_8way())
+		return scanhash_sha256d_8way_le(thr_id, work, max_nonce, hashes_done);
+#endif
+#ifdef HAVE_SHA256_4WAY
+	if (sha256_use_4way())
+		return scanhash_sha256d_4way_le(thr_id, work, max_nonce, hashes_done);
+#endif
+	uint32_t _ALIGN(128) data[64];
+	uint32_t _ALIGN(32) hash[8];
+	uint32_t _ALIGN(32) midstate[8];
+	uint32_t _ALIGN(32) prehash[8];
+	uint32_t *pdata = work->data;
+	uint32_t *ptarget = work->target;
+	
+	uint32_t n = pdata[27] - 1;
+	const uint32_t first_nonce = pdata[27];
+	const uint32_t Htarg = ptarget[7];
+	memcpy(data, pdata + 16, 64);
+	sha256d_preextend(data);
+	
+	sha256_init(midstate);
+	sha256_transform(midstate, pdata, 0);
+	memcpy(prehash, midstate, 32);
+	sha256d_prehash(prehash, pdata + 16);
+	
+	do {
+		data[11] = ++n;
+		sha256d_ms(hash, data, midstate, prehash); // hash, *W, *midstate, *prehash
+		if (unlikely(swab32(hash[7]) <= Htarg)) {
+			pdata[27] = data[11];
+			sha256d_80_swap(hash, pdata);
+			if (fulltest(hash, ptarget)) {
+					/*/debug
+					uint32_t hash_be[8], target_be[8], data_be[256];
+					char hash_str[65], target_str[65], data_str[256];
+					
+					for (char ii = 0; ii < 8; ii++) {
+						be32enc(hash_be + ii, hash[7 - ii]);
+						be32enc(target_be + ii, ptarget[7 - ii]);
+					}
+					for (char ii = 0; ii < 120; ii++) {
+						be32enc(data_be + ii, pdata[ii]);
+					}
+
+					bin2hex(hash_str, (unsigned char *)hash_be, 32);
+					bin2hex(target_str, (unsigned char *)target_be, 32);
+					bin2hex(data_str, (unsigned char *)data_be, 112);
+
+					applog(LOG_DEBUG, "DEBUG:  1way  \nHash:   %s\nTarget: %s\n Header %s\n",
+						hash_str,
+						target_str,
+						data_str);
+				// end debug */
+				work_set_target_ratio(work, hash);
+				*hashes_done = n - first_nonce + 1;
+				return 1;
+			}
+		}
+	} while (likely(n < max_nonce && !work_restart[thr_id].restart));
+	
+	*hashes_done = n - first_nonce + 1;
+	pdata[27] = n;
 	return 0;
 }

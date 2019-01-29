@@ -77,6 +77,8 @@ struct thread_q {
 	pthread_cond_t		cond;
 };
 
+extern bool g_metronome_sleep;
+
 void applog(int prio, const char *fmt, ...)
 {
 	va_list ap;
@@ -1687,13 +1689,14 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 	size_t coinb1_size, coinb2_size;
 	bool clean, ret = false;
 	int merkle_count, i, p=0;
-	bool has_claim, has_roots;
+	bool has_claim, has_roots, has_metronome;
 	json_t *merkle_arr;
 	uchar **merkle;
 
 	get_currentalgo(algo, sizeof(algo));
 	has_claim = strcmp(algo, "lbry") == 0 && json_array_size(params) == 10;
 	has_roots = strcmp(algo, "phi2") == 0 && json_array_size(params) == 10;
+	has_metronome = strcmp(algo, "sha256d-le") == 0 && json_array_size(params) == 10; 
 
 	job_id = json_string_value(json_array_get(params, p++));
 	prevhash = json_string_value(json_array_get(params, p++));
@@ -1721,6 +1724,27 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 	nbits = json_string_value(json_array_get(params, p++));
 	ntime = json_string_value(json_array_get(params, p++));
 	clean = json_is_true(json_array_get(params, p));
+	if (has_metronome) {
+		p++;
+		extradata = json_string_value(json_array_get(params, p));
+
+		if (strlen(extradata) == 0 ) {
+			if (!g_metronome_sleep) {
+				applog(LOG_WARNING,"Entering Sleep Mode..");
+				g_metronome_sleep = true;
+			}
+			extradata = "0000000000000000000000000000000000000000000000000000000000000000";
+		} else {
+			applog(LOG_WARNING,"Starting Job..");
+			g_metronome_sleep = false;
+		}
+
+		if (!extradata) {
+			applog(LOG_ERR, "Stratum notify: invalid metronome parameter: %s", extradata);
+			//goto out;
+		}
+	}
+
 
 	if (!job_id || !prevhash || !coinb1 || !coinb2 || !version || !nbits || !ntime ||
 	    strlen(prevhash) != 64 || strlen(version) != 8 ||
@@ -1762,6 +1786,8 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 
 	if (has_claim) hex2bin(sctx->job.extra, extradata, 32);
 	if (has_roots) hex2bin(sctx->job.extra, extradata, 64);
+
+	if (has_metronome) hex2bin(sctx->job.extra, extradata, 32);
 
 	sctx->bloc_height = getblocheight(sctx);
 

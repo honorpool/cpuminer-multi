@@ -114,6 +114,7 @@ enum algos {
 	ALGO_SCRYPTJANE,  /* Chacha */
 	ALGO_SHAVITE3,    /* Shavite3 */
 	ALGO_SHA256D,     /* SHA-256d */
+	ALGO_SHA256D_LE,  /* SHA-256d with metronome support */
 	ALGO_SIA,         /* Blake2-B */
 	ALGO_SIB,         /* X11 + gost (Sibcoin) */
 	ALGO_SKEIN,       /* Skein */
@@ -179,6 +180,7 @@ static const char *algo_names[] = {
 	"scrypt-jane",
 	"shavite3",
 	"sha256d",
+	"sha256d-le",
 	"sia",
 	"sib",
 	"skein",
@@ -344,6 +346,7 @@ Options:\n\
                           scrypt-jane:N (with N factor from 4 to 30)\n\
                           shavite3     Shavite3\n\
                           sha256d      SHA-256d\n\
+                          sha256d-le   SHA-256d with metronome\n\
                           sia          Blake2-B\n\
                           sib          X11 + gost (SibCoin)\n\
                           skein        Skein+Sha (Skeincoin)\n\
@@ -483,6 +486,7 @@ static time_t g_work_time = 0;
 static pthread_mutex_t g_work_lock;
 static bool submit_old = false;
 static char *lp_id;
+extern bool g_metronome_sleep;
 
 static void workio_cmd_free(struct workio_cmd *wc);
 
@@ -849,6 +853,7 @@ static bool gbt_work_decode(const json_t *val, struct work *work)
 	}
 
 	/* build coinbase transaction */
+	//BLETODO:  NEEDED/CHANGEDS?
 	tmp = json_object_get(val, "coinbasetxn");
 	if (tmp) {
 		const char *cbtx_hex = json_string_value(json_object_get(tmp, "data"));
@@ -981,7 +986,7 @@ static bool gbt_work_decode(const json_t *val, struct work *work)
 		for (i = 0; i < n; i++)
 			sha256d(merkle_tree[i], merkle_tree[2*i], 64);
 	}
-
+//BLE:TODO: FIX BLOCK HEADER??
 	/* assemble block header */
 	work->data[0] = swab32(version);
 	for (i = 0; i < 8; i++)
@@ -1170,6 +1175,11 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 				/* reversed */
 				be32enc(&ntime, work->data[10]);
 				be32enc(&nonce, work->data[8]);
+				break;
+			case ALGO_SHA256D_LE:
+				//offsets adjusted.
+				le32enc(&ntime, work->data[25]);
+				le32enc(&nonce, work->data[27]);
 				break;
 			default:
 				le32enc(&ntime, work->data[17]);
@@ -1639,6 +1649,11 @@ static bool get_work(struct thr_info *thr, struct work *work)
 		memset(work->data + 19, 0x00, 52);
 		if (opt_algo == ALGO_DECRED) {
 			memset(&work->data[35], 0x00, 52);
+		} else if (opt_algo == ALGO_SHA256D_LE) {
+			memset(work->data, 0, 128);
+
+			work->data[28] = 0x80000000;
+			work->data[31] = 0x00000380;
 		} else {
 			work->data[20] = 0x80000000;
 			work->data[31] = 0x00000280;
@@ -1742,11 +1757,15 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 				headersize = min((int)sctx->job.coinbase_size - 32, sizeof(extraheader));
 				memcpy(extraheader, &sctx->job.coinbase[32], headersize);
 				break;
+			case ALGO_SHA256D_LE:
+				headersize = min((int)sctx->job.coinbase_size, sizeof(extraheader));
+				memcpy(extraheader, &sctx->job.extra, headersize);
+				sha256d(merkle_root, sctx->job.coinbase, (int) sctx->job.coinbase_size);
+				break;
 			default:
 				sha256d(merkle_root, sctx->job.coinbase, (int) sctx->job.coinbase_size);
 		}
-
-		if (!headersize)
+		if (!headersize || opt_algo == ALGO_SHA256D_LE)  //Bitcoin LE still needs merkle root...
 		for (i = 0; i < sctx->job.merkle_count; i++) {
 			memcpy(merkle_root + 32, sctx->job.merkle[i], 32);
 			if (opt_algo == ALGO_HEAVY)
@@ -1807,6 +1826,14 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 			for (i = 0; i < 8; i++) // prevhash
 				work->data[12+i] = ((uint32_t*)merkle_root)[i];
 			//applog_hex(&work->data[0], 80);
+		} else if (opt_algo == ALGO_SHA256D_LE) {
+			//same overall structure as SHA256D, but adds "metronome" data to the header.
+			for (i = 0; i < 8; i++)
+				work->data[17 + i] = le32dec((uint32_t *) sctx->job.extra + i);
+			work->data[25] = le32dec(sctx->job.ntime);
+			work->data[26] = le32dec(sctx->job.nbits);
+			work->data[28] = 0x80000000; // Sets 1 bit at end of date, required by sha spec
+			work->data[31] = 0x00000380; // size of data, required by sha spec..
 		} else {
 			work->data[17] = le32dec(sctx->job.ntime);
 			work->data[18] = le32dec(sctx->job.nbits);
@@ -1826,7 +1853,7 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 
 		pthread_mutex_unlock(&sctx->work_lock);
 
-		if (opt_debug && opt_algo != ALGO_DECRED && opt_algo != ALGO_SIA) {
+		if (opt_debug && opt_algo != ALGO_DECRED && opt_algo != ALGO_SIA && opt_algo != ALGO_SHA256D_LE) {
 			char *xnonce2str = abin2hex(work->xnonce2, work->xnonce2_len);
 			applog(LOG_DEBUG, "DEBUG: job_id='%s' extranonce2=%s ntime=%08x",
 					work->job_id, xnonce2str, swab32(work->data[17]));
@@ -1863,6 +1890,9 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 			case ALGO_LYRA2:
 				work_set_target(work, sctx->job.diff / (128.0 * opt_diff_factor));
 				break;
+			case ALGO_SHA256D_LE: 
+				work_set_target(work, sctx->job.diff / (98304.0 * opt_diff_factor));
+				break;
 			default:
 				work_set_target(work, sctx->job.diff / opt_diff_factor);
 		}
@@ -1874,6 +1904,8 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 			if (opt_showdiff && work->targetdiff != stratum_diff)
 				snprintf(sdiff, 32, " (%.5f)", work->targetdiff);
 			applog(LOG_WARNING, "Stratum difficulty set to %g%s", stratum_diff, sdiff);
+
+//			applog(LOG_WARNING, "work target: %08x", work->target[7]);
 		}
 	}
 }
@@ -1934,6 +1966,7 @@ static void *miner_thread(void *userdata)
 	uint32_t end_nonce = 0xffffffffU / opt_n_threads * (thr_id + 1) - 0x20;
 	time_t tm_rate_log = 0;
 	time_t firstwork_time = 0;
+	time_t metronome_sleep_active_time = 0;
 	unsigned char *scratchbuf = NULL;
 	char s[16];
 	int i;
@@ -2030,6 +2063,8 @@ static void *miner_thread(void *userdata)
 		} else if (opt_algo == ALGO_LBRY) {
 			wkcmp_sz = nonce_oft = 108; // 27
 			//regen_work = true;
+		} else if (opt_algo == ALGO_SHA256D_LE) {
+			wkcmp_sz = nonce_oft = 108; // 27
 		} else if (opt_algo == ALGO_SIA) {
 			nonce_oft = 32;
 			wkcmp_offset = 32 + 16;
@@ -2068,7 +2103,7 @@ static void *miner_thread(void *userdata)
 			pthread_mutex_lock(&g_work_lock);
 			if (!have_stratum &&
 			    (time(NULL) - g_work_time >= min_scantime ||
-			     work.data[19] >= end_nonce)) {
+			     work.data[nonce_oft / 4] >= end_nonce)) {
 				if (unlikely(!get_work(mythr, &g_work))) {
 					applog(LOG_ERR, "work retrieval failed, exiting "
 						"mining thread %d", mythr->id);
@@ -2122,6 +2157,28 @@ static void *miner_thread(void *userdata)
 		/* conditional mining */
 		if (!wanna_mine(thr_id)) {
 			sleep(5);
+			continue;
+		}
+		if (g_metronome_sleep) {
+			//Cannot use above unfortunately due to the long sleep time, could miss our chance.
+			usleep(100);
+			//Perodically update user so they know the app isn't frozen.
+			if (thr_id == 0 && time(NULL) - metronome_sleep_active_time > 30 ) {
+				time(&metronome_sleep_active_time);
+				applog(LOG_NOTICE,"Waiting for metronome beat...");
+				//Added to try and reduce "timeout" disconnects.
+				char s[JSON_BUF_LEN];
+						snprintf(s, JSON_BUF_LEN,
+								"{\"method\": \"mining.ping\",\"params\": \"\"}"
+								);
+
+
+					if (unlikely(!stratum_send_line(&stratum, s))) {
+						applog(LOG_ERR, "submit_upstream_work stratum_send_line failed");
+						goto out;
+					}
+
+			}
 			continue;
 		}
 
@@ -2352,6 +2409,9 @@ static void *miner_thread(void *userdata)
 		case ALGO_SHAVITE3:
 			rc = scanhash_ink(thr_id, &work, max_nonce, &hashes_done);
 			break;
+			case ALGO_SHA256D_LE:
+				rc = scanhash_sha256d_le(thr_id, &work, max_nonce,	&hashes_done);
+				break;
 		case ALGO_SHA256D:
 			rc = scanhash_sha256d(thr_id, &work, max_nonce,	&hashes_done);
 			break;
@@ -3391,8 +3451,11 @@ static int thread_create(struct thr_info *thr, void* func)
 
 static void show_credits()
 {
-	printf("** " PACKAGE_NAME " " PACKAGE_VERSION " by tpruvot@github **\n");
-	printf("BTC donation address: 1FhDPLPpw18X4srecguG3MxJYe4a1JsZnd (tpruvot)\n\n");
+	printf("** " PACKAGE_NAME " " PACKAGE_VERSION " by honorpool@github **\n");
+	printf("Modified for BitcoinLE By Honorpool.org \n");
+	printf("Based on source from tpruvot, and others: \n\n");
+	printf("BTC donation address: 1L5L1JbZ9wEpkBKhn63gKmAvhCiA3uuoiA (honorpool)\n\n");
+	printf("BLE donation address: JTud48h4gpK3TWP1vKTiVj13z9KKL9J885 (honorpool)\n\n");
 }
 
 void get_defconfig_path(char *out, size_t bufsize, char *argv0);

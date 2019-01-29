@@ -627,7 +627,6 @@
     <None Include="asm\sha2-arm.S">
       <Filter>algo</Filter>
     </None>
-    <None Include="asm\aesb-x86.S" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="res\cpuminer.ico">
