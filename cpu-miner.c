@@ -2161,7 +2161,11 @@ static void *miner_thread(void *userdata)
 		}
 		if (g_metronome_sleep) {
 			//Cannot use above unfortunately due to the long sleep time, could miss our chance.
+#ifdef _MSC_VER
 				usleep(200);
+#else 
+				nanosleep(200000);
+#endif
 
 			//Perodically update user so they know the app isn't frozen.
 			if (thr_id == 0 && time(NULL) - metronome_sleep_active_time > 30 ) {
