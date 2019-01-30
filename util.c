@@ -1697,6 +1697,28 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 	has_claim = strcmp(algo, "lbry") == 0 && json_array_size(params) == 10;
 	has_roots = strcmp(algo, "phi2") == 0 && json_array_size(params) == 10;
 	has_metronome = strcmp(algo, "sha256d-le") == 0 && json_array_size(params) == 10; 
+	if (strcmp(algo, "sha256d") == 0 && json_array_size(params) == 10) {
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+		applog(LOG_ERR, "Stratum notify: Extra segments present, are you using the correct algo?");
+		applog(LOG_NOTICE, "Stratum notify: For BitcoinLE please use \"-a sha256d-le\"");
+	}
 
 	job_id = json_string_value(json_array_get(params, p++));
 	prevhash = json_string_value(json_array_get(params, p++));

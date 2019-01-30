@@ -2161,7 +2161,8 @@ static void *miner_thread(void *userdata)
 		}
 		if (g_metronome_sleep) {
 			//Cannot use above unfortunately due to the long sleep time, could miss our chance.
-			usleep(100);
+				usleep(200);
+
 			//Perodically update user so they know the app isn't frozen.
 			if (thr_id == 0 && time(NULL) - metronome_sleep_active_time > 30 ) {
 				time(&metronome_sleep_active_time);
@@ -2174,7 +2175,7 @@ static void *miner_thread(void *userdata)
 
 
 					if (unlikely(!stratum_send_line(&stratum, s))) {
-						applog(LOG_ERR, "submit_upstream_work stratum_send_line failed");
+					applog(LOG_ERR, "Send Ping stratum_send_line failed");
 						goto out;
 					}
 
