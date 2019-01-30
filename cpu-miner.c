@@ -2164,7 +2164,7 @@ static void *miner_thread(void *userdata)
 #ifdef _MSC_VER
 				usleep(200);
 #else 
-				nanosleep(200000);
+				usleep(200000);
 #endif
 
 			//Perodically update user so they know the app isn't frozen.
