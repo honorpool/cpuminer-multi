@@ -1,3 +1,7 @@
+BITCOIN LE USERS:
+
+Please use -a sha256d-le or your mining will NOT count
+
 CPUMiner-Multi
 ==============
 
@@ -20,6 +24,7 @@ fork of [pooler](//github.com/pooler)'s cpuminer (see AUTHORS for list of contri
 Algorithms
 ==========
 #### Currently supported
+ * ✓ __sha256d-le__ (BitcoinLE! )
  * ✓ __scrypt__ (Litecoin, Dogecoin, Feathercoin, ...)
  * ✓ __scrypt:N__
  * ✓ __scrypt-jane:N__
