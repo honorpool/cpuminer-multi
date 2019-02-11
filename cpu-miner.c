@@ -1891,8 +1891,6 @@ static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 				work_set_target(work, sctx->job.diff / (128.0 * opt_diff_factor));
 				break;
 			case ALGO_SHA256D_LE: 
-				work_set_target(work, sctx->job.diff / (98304.0 * opt_diff_factor));
-				break;
 			default:
 				work_set_target(work, sctx->job.diff / opt_diff_factor);
 		}
