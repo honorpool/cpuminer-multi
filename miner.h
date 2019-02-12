@@ -3,9 +3,10 @@
 
 #include <cpuminer-config.h>
 
+#ifdef _MSC_VER
 #undef HAVE_ALLOCA_H
 #undef HAVE_SYSLOG_H
-
+#endif
 
 #define USER_AGENT PACKAGE_NAME "/" PACKAGE_VERSION
 #define MAX_CPUS 16
